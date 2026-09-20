@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import RouteForm from './components/RouteForm.jsx';
 import MapView from './components/MapView.jsx';
 import ResultsList from './components/ResultsList.jsx';
-import { searchAlongRoute, fetchLoginStatus } from './api.js';
+import AccessTokenGate from './components/AccessTokenGate.jsx';
+import { searchAlongRoute, fetchLoginStatus, UnauthorizedError } from './api.js';
 
 export default function App() {
   const [loading, setLoading] = useState(false);
@@ -10,12 +11,18 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [providerStatus, setProviderStatus] = useState(null);
   const [radiusMiles, setRadiusMiles] = useState(10);
+  const [needsToken, setNeedsToken] = useState(false);
+  const [pendingForm, setPendingForm] = useState(null);
 
   useEffect(() => {
-    fetchLoginStatus().then(setProviderStatus).catch(() => {});
+    fetchLoginStatus()
+      .then(setProviderStatus)
+      .catch((err) => {
+        if (err instanceof UnauthorizedError) setNeedsToken(true);
+      });
   }, []);
 
-  async function handleSubmit(form) {
+  async function runSearch(form) {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -31,9 +38,24 @@ export default function App() {
       });
       setResult(data);
     } catch (err) {
-      setError(err.message);
+      if (err instanceof UnauthorizedError) {
+        setNeedsToken(true);
+        setPendingForm(form);
+      } else {
+        setError(err.message);
+      }
     } finally {
       setLoading(false);
+    }
+  }
+
+  function handleTokenSaved() {
+    setNeedsToken(false);
+    fetchLoginStatus().then(setProviderStatus).catch(() => {});
+    if (pendingForm) {
+      const form = pendingForm;
+      setPendingForm(null);
+      runSearch(form);
     }
   }
 
@@ -55,13 +77,19 @@ export default function App() {
         )}
       </header>
 
-      <RouteForm onSubmit={handleSubmit} loading={loading} />
+      {needsToken ? (
+        <AccessTokenGate onSaved={handleTokenSaved} />
+      ) : (
+        <>
+          <RouteForm onSubmit={runSearch} loading={loading} />
 
-      {error && <p className="error">{error}</p>}
+          {error && <p className="error">{error}</p>}
 
-      <MapView routePoints={result?.routePoints} waypoints={result?.waypoints} radiusMiles={radiusMiles} />
+          <MapView routePoints={result?.routePoints} waypoints={result?.waypoints} radiusMiles={radiusMiles} />
 
-      <ResultsList listings={result?.listings} distanceMiles={result?.distanceMiles} />
+          <ResultsList listings={result?.listings} distanceMiles={result?.distanceMiles} />
+        </>
+      )}
     </div>
   );
 }

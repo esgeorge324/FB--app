@@ -10,6 +10,16 @@ export function getProvider() {
   return providerInstance;
 }
 
+// Closes and drops the current provider so the next search re-opens a fresh
+// browser context picking up any newly-written session file (see POST
+// /api/fb-session), instead of continuing to use one already open in memory.
+export async function resetProvider() {
+  if (providerInstance) {
+    await providerInstance.close();
+    providerInstance = null;
+  }
+}
+
 /**
  * Runs a marketplace search around every waypoint along the route, then
  * merges the results: a listing showing up near more than one waypoint

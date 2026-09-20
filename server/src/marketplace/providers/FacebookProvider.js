@@ -3,11 +3,19 @@ import { chromium } from 'playwright';
 import { MarketplaceProvider } from './Provider.js';
 import { config } from '../../config.js';
 
-const ITEM_HREF_RE = /\/marketplace\/item\/(\d+)/;
-
 function randomDelay(minMs, maxMs) {
   const ms = minMs + Math.random() * (maxMs - minMs);
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Classifies where a page landed after navigation. "blocked" covers Facebook's
+// checkpoint/suspicious-activity interstitial - detecting this and stopping
+// is the honest response; this provider never tries to click through or
+// otherwise defeat it.
+function classifyPageUrl(url) {
+  if (/\/login/.test(url)) return 'login-expired';
+  if (/\/checkpoint\//.test(url)) return 'blocked';
+  return 'ok';
 }
 
 /**
@@ -73,18 +81,39 @@ export class FacebookProvider extends MarketplaceProvider {
     return url.toString();
   }
 
-  async search(params) {
+  async search(params, { retriesLeft = 1 } = {}) {
     const context = await this.#ensureContext();
     await this.#throttle();
 
     const page = await context.newPage();
     try {
       const url = this.buildSearchUrl(params);
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: config.fb.navTimeoutMs });
 
-      if (/\/login/.test(page.url())) {
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: config.fb.navTimeoutMs });
+      } catch (err) {
+        // Transient network hiccups are common over a long run of waypoints; retry once
+        // before giving up on this particular waypoint (the caller already tolerates a
+        // whole waypoint failing, but a single retry avoids losing data to a blip).
+        if (retriesLeft > 0) {
+          await page.close();
+          return this.search(params, { retriesLeft: retriesLeft - 1 });
+        }
+        throw new Error(`Could not load Marketplace search (${err.message}).`);
+      }
+
+      const status = classifyPageUrl(page.url());
+      if (status === 'login-expired') {
         throw new Error(
           'Facebook redirected to the login page - your saved session has expired. Re-run "npm run fb:login".'
+        );
+      }
+      if (status === 'blocked') {
+        throw new Error(
+          'Facebook showed a checkpoint/suspicious-activity page instead of search results. ' +
+            'This provider does not attempt to click through it - resolve the checkpoint yourself by logging in ' +
+            'normally in a browser, then re-run "npm run fb:login". If this keeps happening, slow down ' +
+            'FB_MIN_DELAY_MS/FB_MAX_DELAY_MS or reduce MAX_WAYPOINTS.'
         );
       }
 
@@ -114,9 +143,12 @@ export class FacebookProvider extends MarketplaceProvider {
 
           const priceText = texts.find((t) => /^\$[\d,]+|^Free$/i.test(t)) || '';
           const remaining = texts.filter((t) => t !== priceText);
-          const title = remaining[0] || '';
-          const locationText = remaining.length > 1 ? remaining[remaining.length - 1] : null;
+          // Fall back to the anchor's own accessible text/image alt when the span-based
+          // heuristic finds nothing - Facebook has shipped card layouts without plain
+          // <span> text nodes before, and this keeps a title from silently going blank.
           const img = a.querySelector('img');
+          const title = remaining[0] || a.getAttribute('aria-label') || img?.getAttribute('alt') || '';
+          const locationText = remaining.length > 1 ? remaining[remaining.length - 1] : null;
 
           out.push({
             id,
@@ -132,7 +164,7 @@ export class FacebookProvider extends MarketplaceProvider {
         return out;
       });
     } finally {
-      await page.close();
+      await page.close().catch(() => {});
     }
   }
 
@@ -155,8 +187,11 @@ export class FacebookProvider extends MarketplaceProvider {
         waitUntil: 'domcontentloaded',
         timeout: config.fb.navTimeoutMs,
       });
-      const loggedIn = !/\/login/.test(page.url());
-      return { loggedIn, reason: loggedIn ? null : 'redirected-to-login' };
+      const status = classifyPageUrl(page.url());
+      return {
+        loggedIn: status === 'ok',
+        reason: status === 'ok' ? null : status === 'blocked' ? 'checkpoint' : 'redirected-to-login',
+      };
     } finally {
       await page.close();
     }
