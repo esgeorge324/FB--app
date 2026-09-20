@@ -1,0 +1,14 @@
+{
+  "name": "fb-marketplace-route-search",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client",
+    "fb:login": "npm run fb:login --workspace server"
+  }
+}
