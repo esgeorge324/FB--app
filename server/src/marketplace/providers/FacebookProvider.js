@@ -89,8 +89,11 @@ export class FacebookProvider extends MarketplaceProvider {
     try {
       const url = this.buildSearchUrl(params);
 
+      console.log(`[facebook] requesting: ${url}`);
+
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: config.fb.navTimeoutMs });
+        console.log(`[facebook] landed on: ${page.url()}`);
       } catch (err) {
         // Transient network hiccups are common over a long run of waypoints; retry once
         // before giving up on this particular waypoint (the caller already tolerates a
