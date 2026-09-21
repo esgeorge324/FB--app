@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { geocode } from '../geo/geocode.js';
 import { fetchRoute } from '../geo/route.js';
 import { sampleWaypoints } from '../geo/waypoints.js';
-import { searchAlongRoute, getProvider } from '../marketplace/search.js';
+import { searchAlongRoute, getProvider, resetProvider } from '../marketplace/search.js';
 import { config } from '../config.js';
 
 export const api = Router();
@@ -83,4 +85,37 @@ api.get('/login-status', async (_req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Lets you push the Facebook session captured locally (via `npm run fb:login`,
+// which needs a real display) onto a headless, remotely-hosted server that
+// has none. Deliberately requires APP_ACCESS_TOKEN to already be configured -
+// this endpoint writes live session cookies to disk, so it must never be
+// reachable without a secret even if you forget to set one everywhere else.
+api.post('/fb-session', async (req, res) => {
+  if (!config.accessToken) {
+    return res.status(403).json({
+      error: 'Set APP_ACCESS_TOKEN on the server before uploading a session remotely.',
+    });
+  }
+
+  const storageState = req.body;
+  if (!storageState || !Array.isArray(storageState.cookies) || !Array.isArray(storageState.origins)) {
+    return res.status(400).json({ error: 'Body must be a Playwright storageState JSON object (cookies + origins).' });
+  }
+
+  try {
+    mkdirSync(dirname(config.fb.storageStatePath), { recursive: true });
+    writeFileSync(config.fb.storageStatePath, JSON.stringify(storageState));
+    chmodSync(config.fb.storageStatePath, 0o600);
+  } catch (err) {
+    return res.status(500).json({ error: `Failed to save session: ${err.message}` });
+  }
+
+  try {
+    await resetProvider();
+  } catch (err) {
+    console.error('Failed to close previous provider after session upload:', err.message);
+  }
+  res.json({ ok: true });
 });

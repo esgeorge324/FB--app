@@ -8,6 +8,12 @@ function num(value, fallback) {
 export const config = {
   port: num(process.env.PORT, 3001),
 
+  // Shared secret required on every /api request when set (via an
+  // "Authorization: Bearer <token>" header). Required in production/hosted
+  // deployments so a stranger can't hit your server, burn your Facebook
+  // session's rate limit, or push a replacement session onto it.
+  accessToken: process.env.APP_ACCESS_TOKEN || null,
+
   // Which marketplace data source to use: "mock" (safe, synthetic data, default)
   // or "facebook" (real Playwright automation against your own logged-in session).
   marketplaceProvider: process.env.MARKETPLACE_PROVIDER || 'mock',

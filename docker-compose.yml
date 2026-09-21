@@ -1,0 +1,21 @@
+services:
+  server:
+    build: ./server
+    env_file:
+      - ./server/.env
+    volumes:
+      # Persists the Facebook session (and nothing else) across container
+      # restarts/rebuilds, so you don't have to re-run fb:login every deploy.
+      - fb-session-data:/app/.data
+    restart: unless-stopped
+
+  client:
+    build: ./client
+    ports:
+      - '8080:80'
+    depends_on:
+      - server
+    restart: unless-stopped
+
+volumes:
+  fb-session-data:
